@@ -62,6 +62,50 @@ jobs:
         build-tools: 30.0.3
         ndk-version: 25.2.9519653
 
+    - name: Accept Android SDK licenses
+      run: |
+        # Create Android SDK directories if they don't exist
+        mkdir -p $ANDROID_SDK_ROOT/licenses
+
+        # Accept all Android SDK licenses automatically
+        echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_SDK_ROOT/licenses/android-sdk-license
+        echo "84831b9409646a918e30573bab4c9c91346d8abd" > $ANDROID_SDK_ROOT/licenses/android-sdk-preview-license
+        echo "d975f751698a77b662f1254ddbeed3901e976f5a" > $ANDROID_SDK_ROOT/licenses/intel-android-extra-license
+        echo "601085b94cd77f0b54ff86406957099ebe79c4d6" > $ANDROID_SDK_ROOT/licenses/android-googletv-license
+        echo "33b6a2b64607f11b759f320ef9dff4ae5c47d97a" > $ANDROID_SDK_ROOT/licenses/google-gdk-license
+        echo "8933bad161af4178b1185d1a37fbf41ea5269c55" > $ANDROID_SDK_ROOT/licenses/android-sdk-arm-dbt-license
+        echo "79120722343a6f314e0719f863036c702b0e6b2a" > $ANDROID_SDK_ROOT/licenses/android-sdk-preview-license-old
+        echo "504667f4c0de7af1a06de9f4b1727b84351f2910" > $ANDROID_SDK_ROOT/licenses/android-sdk-license-bcbbd656
+        echo "e9acab5b5fbb560a72cfaecce8946896ff6aab9d" > $ANDROID_SDK_ROOT/licenses/mips-android-sysimage-license
+
+        # Alternative method: Use sdkmanager to accept licenses
+        yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+        # Verify licenses are accepted
+        echo "Checking accepted licenses:"
+        ls -la $ANDROID_SDK_ROOT/licenses/ || echo "No licenses directory found"
+
+    - name: Install additional Android SDK components
+      run: |
+        # Update SDK manager and install required components
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --update
+
+        # Install specific build-tools versions that might be needed
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.2"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0"
+
+        # Install platform tools and other essentials
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
+
+        # Verify installations
+        echo "Installed build-tools:"
+        ls -la $ANDROID_SDK_ROOT/build-tools/ || echo "No build-tools directory found"
+        echo "Installed platforms:"
+        ls -la $ANDROID_SDK_ROOT/platforms/ || echo "No platforms directory found"
+
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -100,7 +144,7 @@ jobs:
         export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
         export ANDROID_HOME=$ANDROID_HOME
         export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
-        export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools
+        export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
         # Ensure buildozer uses the correct home directory
         export HOME=/home/runner
@@ -118,6 +162,22 @@ jobs:
         echo "Android NDK Home: $ANDROID_NDK_HOME"
         echo "Java Home: $JAVA_HOME"
         echo "Buildozer Home: $BUILDOZER_HOME"
+        echo "PATH: $PATH"
+
+        # Verify Android SDK components
+        echo "=== Android SDK Verification ==="
+        echo "SDK Root contents:"
+        ls -la $ANDROID_SDK_ROOT/ || echo "SDK Root not found"
+        echo "Build-tools available:"
+        ls -la $ANDROID_SDK_ROOT/build-tools/ || echo "No build-tools found"
+        echo "Platform-tools:"
+        ls -la $ANDROID_SDK_ROOT/platform-tools/ || echo "No platform-tools found"
+        echo "Licenses:"
+        ls -la $ANDROID_SDK_ROOT/licenses/ || echo "No licenses found"
+
+        # Check for aidl tool specifically
+        echo "=== AIDL Tool Check ==="
+        find $ANDROID_SDK_ROOT -name "aidl" -type f 2>/dev/null || echo "AIDL tool not found"
 
         # Verify buildozer.spec exists and show NDK path setting
         if [ -f buildozer.spec ]; then
@@ -131,7 +191,12 @@ jobs:
         # Clean any previous builds to avoid path conflicts
         buildozer android clean || true
 
+        # Final license check before building
+        echo "=== Final License Check ==="
+        yes | sdkmanager --licenses || echo "License acceptance completed"
+
         # Build the APK
+        echo "=== Starting APK Build ==="
         buildozer android debug
       env:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
