@@ -113,7 +113,8 @@ android.archs = arm64-v8a
 android.private_storage = True
 
 # (str) Android NDK directory (if empty, it will be automatically downloaded.)
-android.ndk_path = /home/hz/.buildozer/android/platform/android-ndk-r25b
+# Leave empty to auto-download, compatible with both local and CI environments
+#android.ndk_path =
 
 # (str) Android SDK directory (if empty, it will be automatically downloaded.)
 #android.sdk_path =

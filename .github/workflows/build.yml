@@ -73,32 +73,63 @@ jobs:
         python -c "import kivy; print(f'Kivy version: {kivy.__version__}')"
         buildozer --version
 
+    - name: Setup Buildozer environment
+      run: |
+        # Ensure correct permissions and directories for GitHub Actions
+        sudo chown -R runner:runner /home/runner || true
+        mkdir -p /home/runner/.buildozer
+        chmod -R 755 /home/runner/.buildozer
+
+        # Show directory structure for debugging
+        echo "Home directory contents:"
+        ls -la /home/runner/
+        echo "Buildozer directory:"
+        ls -la /home/runner/.buildozer/ || echo "Buildozer directory doesn't exist yet"
+
     - name: Cache Buildozer global directory
       uses: actions/cache@v3
       with:
-        path: ~/.buildozer
+        path: /home/runner/.buildozer
         key: ${{ runner.os }}-buildozer-${{ hashFiles('buildozer.spec') }}
         restore-keys: |
           ${{ runner.os }}-buildozer-
 
     - name: Build APK with Buildozer
       run: |
-        # Set up environment variables
+        # Set up environment variables for GitHub Actions
         export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
         export ANDROID_HOME=$ANDROID_HOME
         export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
         export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools
 
+        # Ensure buildozer uses the correct home directory
+        export HOME=/home/runner
+        export BUILDOZER_HOME=/home/runner/.buildozer
+
+        # Create buildozer directory if it doesn't exist
+        mkdir -p /home/runner/.buildozer
+
         # Show environment info for debugging
+        echo "Current user: $(whoami)"
+        echo "Home directory: $HOME"
+        echo "Working directory: $(pwd)"
         echo "Android SDK Root: $ANDROID_SDK_ROOT"
         echo "Android Home: $ANDROID_HOME"
         echo "Android NDK Home: $ANDROID_NDK_HOME"
         echo "Java Home: $JAVA_HOME"
+        echo "Buildozer Home: $BUILDOZER_HOME"
 
-        # Initialize buildozer if needed
-        if [ ! -f buildozer.spec ]; then
+        # Verify buildozer.spec exists and show NDK path setting
+        if [ -f buildozer.spec ]; then
+          echo "buildozer.spec found"
+          grep -n "android.ndk_path" buildozer.spec || echo "android.ndk_path not set (will auto-download)"
+        else
+          echo "buildozer.spec not found, initializing..."
           buildozer init
         fi
+
+        # Clean any previous builds to avoid path conflicts
+        buildozer android clean || true
 
         # Build the APK
         buildozer android debug
@@ -106,6 +137,8 @@ jobs:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         ANDROID_HOME: ${{ env.ANDROID_HOME }}
         ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        HOME: /home/runner
+        BUILDOZER_HOME: /home/runner/.buildozer
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
