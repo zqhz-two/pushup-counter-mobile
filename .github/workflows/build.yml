@@ -189,22 +189,47 @@ jobs:
     - name: Configure autotools environment
       run: |
         # Ensure autotools can find all necessary macros
-        echo "=== Autotools Environment Setup ==="
+        echo "=== Comprehensive Autotools Environment Setup ==="
 
         # Update autotools macro search path
-        export ACLOCAL_PATH="/usr/share/aclocal:${ACLOCAL_PATH}"
+        export ACLOCAL_PATH="/usr/share/aclocal:/usr/local/share/aclocal:${ACLOCAL_PATH}"
         echo "ACLOCAL_PATH=$ACLOCAL_PATH" >> $GITHUB_ENV
 
-        # Regenerate autotools cache
+        # Force regenerate aclocal cache
+        sudo aclocal --force --install || true
         sudo autoreconf --install --force || true
 
+        # Install additional libtool support if needed
+        if ! grep -r "LT_SYS_SYMBOL_USCORE" /usr/share/aclocal/ >/dev/null 2>&1; then
+          echo "LT_SYS_SYMBOL_USCORE macro not found, installing additional libtool support..."
+
+          # Try to install libtool from source if the macro is missing
+          cd /tmp
+          wget -q https://ftp.gnu.org/gnu/libtool/libtool-2.4.7.tar.gz
+          tar -xzf libtool-2.4.7.tar.gz
+          cd libtool-2.4.7
+          ./configure --prefix=/usr/local
+          make -j$(nproc)
+          sudo make install
+
+          # Update aclocal path to include new installation
+          export ACLOCAL_PATH="/usr/local/share/aclocal:/usr/share/aclocal:${ACLOCAL_PATH}"
+          echo "ACLOCAL_PATH=$ACLOCAL_PATH" >> $GITHUB_ENV
+
+          cd /home/runner/work/pushup-counter-mobile/pushup-counter-mobile
+        fi
+
         # Verify libtool macros are available
+        echo "=== Libtool Macro Verification ==="
         echo "Checking for LT_SYS_SYMBOL_USCORE macro:"
-        grep -r "LT_SYS_SYMBOL_USCORE" /usr/share/aclocal/ || echo "Macro not found in standard location"
+        grep -r "LT_SYS_SYMBOL_USCORE" /usr/share/aclocal/ /usr/local/share/aclocal/ 2>/dev/null || echo "Macro still not found"
 
         # List available libtool-related macros
-        echo "Available libtool macros:"
-        ls -la /usr/share/aclocal/*libtool* || echo "No libtool macro files found"
+        echo "Available libtool macro files:"
+        find /usr/share/aclocal /usr/local/share/aclocal -name "*libtool*" 2>/dev/null || echo "No libtool macro files found"
+
+        # Show aclocal search path
+        echo "Aclocal search path: $ACLOCAL_PATH"
 
     - name: Install Python dependencies
       run: |
@@ -255,7 +280,12 @@ jobs:
         export ANDROIDNDK=$NDK_25_PATH
         export NDK_ROOT=$NDK_25_PATH
 
-        export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
+        # Ensure autotools environment is properly set
+        export ACLOCAL_PATH="/usr/local/share/aclocal:/usr/share/aclocal:${ACLOCAL_PATH}"
+        export LIBTOOL="/usr/local/bin/libtool"
+        export LIBTOOLIZE="/usr/local/bin/libtoolize"
+
+        export PATH=/usr/local/bin:$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
         # Ensure buildozer uses the correct home directory
         export HOME=/home/runner
@@ -523,6 +553,9 @@ jobs:
         ANDROIDNDK: ${{ env.NDK_25_PATH }}
         NDK_ROOT: ${{ env.NDK_25_PATH }}
         NDK_25_PATH: ${{ env.NDK_25_PATH }}
+        ACLOCAL_PATH: ${{ env.ACLOCAL_PATH }}
+        LIBTOOL: /usr/local/bin/libtool
+        LIBTOOLIZE: /usr/local/bin/libtoolize
         HOME: /home/runner
         BUILDOZER_HOME: /home/runner/.buildozer
 
