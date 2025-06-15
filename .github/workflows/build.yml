@@ -62,39 +62,44 @@ jobs:
         build-tools: 30.0.3
         ndk-version: 25.2.9519653
 
-    - name: Configure NDK environment
+    - name: Download and configure NDK r25b
       run: |
-        # Ensure consistent NDK version usage
-        echo "=== NDK Configuration ==="
-        echo "ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
-        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "=== NDK r25b Download and Configuration ==="
 
-        # Find the correct NDK r25 installation
-        NDK_25_PATH=""
-        if [ -d "$ANDROID_SDK_ROOT/ndk" ]; then
-          echo "Available NDK versions in SDK:"
-          ls -la $ANDROID_SDK_ROOT/ndk/
-          # Find NDK 25.x version
-          NDK_25_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -name "25.*" -type d | head -1)
-        fi
+        # Create NDK directory
+        mkdir -p /home/runner/.buildozer/android/platform
 
-        if [ -n "$NDK_25_PATH" ]; then
-          echo "Found NDK 25 at: $NDK_25_PATH"
-          echo "NDK_25_PATH=$NDK_25_PATH" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$NDK_25_PATH" >> $GITHUB_ENV
-          echo "ANDROIDNDK=$NDK_25_PATH" >> $GITHUB_ENV
+        # Download NDK r25b directly to ensure we have the correct version
+        NDK_25B_URL="https://dl.google.com/android/repository/android-ndk-r25b-linux.zip"
+        NDK_25B_PATH="/home/runner/.buildozer/android/platform/android-ndk-r25b"
+
+        if [ ! -d "$NDK_25B_PATH" ]; then
+          echo "Downloading NDK r25b..."
+          cd /home/runner/.buildozer/android/platform
+          wget -q "$NDK_25B_URL" -O android-ndk-r25b.zip
+          echo "Extracting NDK r25b..."
+          unzip -q android-ndk-r25b.zip
+          rm android-ndk-r25b.zip
+          echo "NDK r25b downloaded and extracted successfully"
         else
-          echo "NDK 25 not found, will use ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
-          echo "NDK_25_PATH=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
-          echo "ANDROIDNDK=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          echo "NDK r25b already exists at $NDK_25B_PATH"
         fi
 
-        # Verify NDK version
-        if [ -f "$ANDROID_NDK_ROOT/source.properties" ]; then
-          echo "NDK version info:"
-          cat $ANDROID_NDK_ROOT/source.properties
+        # Verify NDK r25b installation
+        if [ -f "$NDK_25B_PATH/source.properties" ]; then
+          echo "NDK r25b version info:"
+          cat "$NDK_25B_PATH/source.properties"
+        else
+          echo "ERROR: NDK r25b source.properties not found!"
+          exit 1
         fi
+
+        # Set environment variables
+        echo "NDK_25_PATH=$NDK_25B_PATH" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$NDK_25B_PATH" >> $GITHUB_ENV
+        echo "ANDROIDNDK=$NDK_25B_PATH" >> $GITHUB_ENV
+
+        echo "NDK r25b configured at: $NDK_25B_PATH"
 
     - name: Accept Android SDK licenses
       run: |
@@ -158,13 +163,9 @@ jobs:
         mkdir -p /home/runner/.buildozer
         chmod -R 755 /home/runner/.buildozer
 
-        # Clean any existing NDK installations in buildozer cache to avoid conflicts
-        echo "=== Cleaning Buildozer NDK Cache ==="
-        if [ -d "/home/runner/.buildozer/android/platform" ]; then
-          echo "Removing any cached NDK installations..."
-          rm -rf /home/runner/.buildozer/android/platform/android-ndk-* || true
-          ls -la /home/runner/.buildozer/android/platform/ || echo "Platform directory cleaned"
-        fi
+        # Note: NDK r25b is now directly downloaded and configured in previous step
+        echo "=== Buildozer Environment Setup ==="
+        echo "NDK r25b should already be available at the configured path"
 
         # Show directory structure for debugging
         echo "Home directory contents:"
@@ -196,12 +197,12 @@ jobs:
         # Create buildozer directory if it doesn't exist
         mkdir -p /home/runner/.buildozer
 
-        # Force buildozer to use the correct NDK by creating a symlink
-        mkdir -p /home/runner/.buildozer/android/platform
-        if [ ! -L "/home/runner/.buildozer/android/platform/android-ndk-r25b" ] && [ -d "$NDK_25_PATH" ]; then
-          echo "Creating symlink to force NDK r25b usage..."
-          ln -sf "$NDK_25_PATH" "/home/runner/.buildozer/android/platform/android-ndk-r25b"
+        # Verify NDK r25b is available
+        if [ ! -d "$NDK_25_PATH" ]; then
+          echo "ERROR: NDK r25b not found at $NDK_25_PATH"
+          exit 1
         fi
+        echo "NDK r25b confirmed at: $NDK_25_PATH"
 
         # Show environment info for debugging
         echo "=== Environment Information ==="
@@ -217,16 +218,31 @@ jobs:
         echo "Buildozer Home: $BUILDOZER_HOME"
         echo "PATH: $PATH"
 
-        # Verify NDK version and paths
-        echo "=== NDK Version Verification ==="
+        # Comprehensive NDK verification
+        echo "=== Comprehensive NDK Verification ==="
+        echo "ANDROIDNDK: $ANDROIDNDK"
+        echo "ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "NDK_25_PATH: $NDK_25_PATH"
+
         if [ -f "$ANDROIDNDK/source.properties" ]; then
           echo "NDK source.properties content:"
           cat "$ANDROIDNDK/source.properties"
+
+          # Extract and verify NDK version
+          NDK_VERSION=$(grep "Pkg.Revision" "$ANDROIDNDK/source.properties" | cut -d'=' -f2 | tr -d ' ')
+          echo "Detected NDK version: $NDK_VERSION"
+
+          if [[ "$NDK_VERSION" == 25.* ]]; then
+            echo "✅ NDK version is correct (25.x)"
+          else
+            echo "❌ WARNING: NDK version is not 25.x, this may cause issues"
+          fi
         else
-          echo "NDK source.properties not found at $ANDROIDNDK"
+          echo "❌ ERROR: NDK source.properties not found at $ANDROIDNDK"
+          exit 1
         fi
 
-        echo "Buildozer NDK symlink status:"
+        echo "Buildozer platform directory contents:"
         ls -la /home/runner/.buildozer/android/platform/ || echo "Platform directory not found"
 
         # Verify Android SDK components
@@ -260,9 +276,41 @@ jobs:
         echo "=== Final License Check ==="
         yes | sdkmanager --licenses || echo "License acceptance completed"
 
-        # Build the APK
+        # Build the APK with enhanced error handling
         echo "=== Starting APK Build ==="
+        echo "Buildozer command will be executed with the following environment:"
+        echo "  ANDROIDNDK: $ANDROIDNDK"
+        echo "  ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "  ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+        echo "  ANDROID_HOME: $ANDROID_HOME"
+
+        # Run buildozer with error capture
+        set +e  # Don't exit on error immediately
         buildozer android debug
+        BUILD_EXIT_CODE=$?
+        set -e  # Re-enable exit on error
+
+        if [ $BUILD_EXIT_CODE -ne 0 ]; then
+          echo "❌ Buildozer failed with exit code: $BUILD_EXIT_CODE"
+          echo "=== Buildozer Error Analysis ==="
+
+          # Check for common error patterns in buildozer logs
+          if [ -f ".buildozer/android/platform/python-for-android/dist/pushup_counter/build.log" ]; then
+            echo "Python-for-android build log (last 50 lines):"
+            tail -50 ".buildozer/android/platform/python-for-android/dist/pushup_counter/build.log"
+          fi
+
+          # Check for NDK-related errors
+          echo "Checking for NDK-related issues..."
+          find .buildozer -name "*.log" -exec grep -l "ndk\|NDK" {} \; | head -5 | while read logfile; do
+            echo "NDK references in $logfile:"
+            grep -n "ndk\|NDK" "$logfile" | tail -10
+          done
+
+          exit $BUILD_EXIT_CODE
+        else
+          echo "✅ Buildozer completed successfully!"
+        fi
       env:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         ANDROID_HOME: ${{ env.ANDROID_HOME }}
@@ -285,5 +333,8 @@ jobs:
       if: failure()
       with:
         name: build-logs
-        path: .buildozer/android/platform/build-*/
+        path: |
+          .buildozer/android/platform/build-*/**/*.log
+          .buildozer/android/platform/python-for-android/**/*.log
+          .buildozer/android/platform/python-for-android/dist/*/build.log
         retention-days: 7
