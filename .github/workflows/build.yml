@@ -186,8 +186,14 @@ jobs:
         # Set up environment variables for GitHub Actions
         export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
         export ANDROID_HOME=$ANDROID_HOME
+
+        # Override ALL NDK-related environment variables to use our NDK r25b
         export ANDROID_NDK_HOME=$NDK_25_PATH
+        export ANDROID_NDK_ROOT=$NDK_25_PATH
+        export ANDROID_NDK=$NDK_25_PATH
         export ANDROIDNDK=$NDK_25_PATH
+        export NDK_ROOT=$NDK_25_PATH
+
         export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
         # Ensure buildozer uses the correct home directory
@@ -212,7 +218,10 @@ jobs:
         echo "Android SDK Root: $ANDROID_SDK_ROOT"
         echo "Android Home: $ANDROID_HOME"
         echo "Android NDK Home: $ANDROID_NDK_HOME"
+        echo "Android NDK Root: $ANDROID_NDK_ROOT"
+        echo "Android NDK: $ANDROID_NDK"
         echo "ANDROIDNDK: $ANDROIDNDK"
+        echo "NDK_ROOT: $NDK_ROOT"
         echo "NDK_25_PATH: $NDK_25_PATH"
         echo "Java Home: $JAVA_HOME"
         echo "Buildozer Home: $BUILDOZER_HOME"
@@ -280,13 +289,20 @@ jobs:
         echo "=== Starting APK Build ==="
         echo "Buildozer command will be executed with the following environment:"
         echo "  ANDROIDNDK: $ANDROIDNDK"
+        echo "  ANDROID_NDK: $ANDROID_NDK"
+        echo "  ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
         echo "  ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        echo "  NDK_ROOT: $NDK_ROOT"
         echo "  ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
         echo "  ANDROID_HOME: $ANDROID_HOME"
 
-        # Run buildozer with error capture
+        # Unset conflicting system NDK variables before running buildozer
+        unset ANDROID_NDK_LATEST_HOME || true
+
+        # Run buildozer with error capture and output logging
         set +e  # Don't exit on error immediately
-        buildozer android debug
+        echo "Executing: buildozer android debug"
+        buildozer android debug 2>&1 | tee /tmp/buildozer_output.log
         BUILD_EXIT_CODE=$?
         set -e  # Re-enable exit on error
 
@@ -294,17 +310,46 @@ jobs:
           echo "❌ Buildozer failed with exit code: $BUILD_EXIT_CODE"
           echo "=== Buildozer Error Analysis ==="
 
-          # Check for common error patterns in buildozer logs
-          if [ -f ".buildozer/android/platform/python-for-android/dist/pushup_counter/build.log" ]; then
-            echo "Python-for-android build log (last 50 lines):"
-            tail -50 ".buildozer/android/platform/python-for-android/dist/pushup_counter/build.log"
+          # Show the last part of buildozer output for immediate context
+          echo "=== Last 30 lines of buildozer output ==="
+          tail -30 /tmp/buildozer_output.log 2>/dev/null || echo "No buildozer output log found"
+
+          # Check for python-for-android logs
+          echo "=== Python-for-android logs ==="
+          P4A_LOG_DIR=".buildozer/android/platform/python-for-android"
+          if [ -d "$P4A_LOG_DIR" ]; then
+            echo "Available log files:"
+            find "$P4A_LOG_DIR" -name "*.log" -type f | head -10
+
+            # Check the main build log
+            if [ -f "$P4A_LOG_DIR/dist/pushup_counter/build.log" ]; then
+              echo "Python-for-android build log (last 100 lines):"
+              tail -100 "$P4A_LOG_DIR/dist/pushup_counter/build.log"
+            fi
+
+            # Check for any error logs
+            find "$P4A_LOG_DIR" -name "*error*.log" -type f | head -3 | while read errorlog; do
+              echo "Error log: $errorlog"
+              cat "$errorlog"
+            done
           fi
 
-          # Check for NDK-related errors
-          echo "Checking for NDK-related issues..."
-          find .buildozer -name "*.log" -exec grep -l "ndk\|NDK" {} \; | head -5 | while read logfile; do
-            echo "NDK references in $logfile:"
-            grep -n "ndk\|NDK" "$logfile" | tail -10
+          # Check for NDK-related errors with more context
+          echo "=== NDK Environment Check ==="
+          echo "All NDK-related environment variables:"
+          env | grep -i ndk | sort
+
+          echo "=== NDK-related errors in logs ==="
+          find .buildozer -name "*.log" -type f -exec grep -l "ndk\|NDK" {} \; | head -5 | while read logfile; do
+            echo "=== NDK references in $logfile ==="
+            grep -n -C 3 "ndk\|NDK" "$logfile" | tail -20
+          done
+
+          # Check for specific error patterns
+          echo "=== Common Error Patterns ==="
+          find .buildozer -name "*.log" -type f -exec grep -l "error\|Error\|ERROR\|failed\|Failed\|FAILED" {} \; | head -3 | while read errorlog; do
+            echo "Errors in $errorlog:"
+            grep -n -i "error\|failed" "$errorlog" | tail -10
           done
 
           exit $BUILD_EXIT_CODE
@@ -315,7 +360,10 @@ jobs:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         ANDROID_HOME: ${{ env.ANDROID_HOME }}
         ANDROID_NDK_HOME: ${{ env.NDK_25_PATH }}
+        ANDROID_NDK_ROOT: ${{ env.NDK_25_PATH }}
+        ANDROID_NDK: ${{ env.NDK_25_PATH }}
         ANDROIDNDK: ${{ env.NDK_25_PATH }}
+        NDK_ROOT: ${{ env.NDK_25_PATH }}
         NDK_25_PATH: ${{ env.NDK_25_PATH }}
         HOME: /home/runner
         BUILDOZER_HOME: /home/runner/.buildozer
