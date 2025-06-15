@@ -62,6 +62,40 @@ jobs:
         build-tools: 30.0.3
         ndk-version: 25.2.9519653
 
+    - name: Configure NDK environment
+      run: |
+        # Ensure consistent NDK version usage
+        echo "=== NDK Configuration ==="
+        echo "ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+        echo "ANDROID_SDK_ROOT: $ANDROID_SDK_ROOT"
+
+        # Find the correct NDK r25 installation
+        NDK_25_PATH=""
+        if [ -d "$ANDROID_SDK_ROOT/ndk" ]; then
+          echo "Available NDK versions in SDK:"
+          ls -la $ANDROID_SDK_ROOT/ndk/
+          # Find NDK 25.x version
+          NDK_25_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -name "25.*" -type d | head -1)
+        fi
+
+        if [ -n "$NDK_25_PATH" ]; then
+          echo "Found NDK 25 at: $NDK_25_PATH"
+          echo "NDK_25_PATH=$NDK_25_PATH" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_25_PATH" >> $GITHUB_ENV
+          echo "ANDROIDNDK=$NDK_25_PATH" >> $GITHUB_ENV
+        else
+          echo "NDK 25 not found, will use ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+          echo "NDK_25_PATH=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROIDNDK=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+        fi
+
+        # Verify NDK version
+        if [ -f "$ANDROID_NDK_ROOT/source.properties" ]; then
+          echo "NDK version info:"
+          cat $ANDROID_NDK_ROOT/source.properties
+        fi
+
     - name: Accept Android SDK licenses
       run: |
         # Create Android SDK directories if they don't exist
@@ -124,6 +158,14 @@ jobs:
         mkdir -p /home/runner/.buildozer
         chmod -R 755 /home/runner/.buildozer
 
+        # Clean any existing NDK installations in buildozer cache to avoid conflicts
+        echo "=== Cleaning Buildozer NDK Cache ==="
+        if [ -d "/home/runner/.buildozer/android/platform" ]; then
+          echo "Removing any cached NDK installations..."
+          rm -rf /home/runner/.buildozer/android/platform/android-ndk-* || true
+          ls -la /home/runner/.buildozer/android/platform/ || echo "Platform directory cleaned"
+        fi
+
         # Show directory structure for debugging
         echo "Home directory contents:"
         ls -la /home/runner/
@@ -143,7 +185,8 @@ jobs:
         # Set up environment variables for GitHub Actions
         export ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT
         export ANDROID_HOME=$ANDROID_HOME
-        export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
+        export ANDROID_NDK_HOME=$NDK_25_PATH
+        export ANDROIDNDK=$NDK_25_PATH
         export PATH=$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
         # Ensure buildozer uses the correct home directory
@@ -153,16 +196,38 @@ jobs:
         # Create buildozer directory if it doesn't exist
         mkdir -p /home/runner/.buildozer
 
+        # Force buildozer to use the correct NDK by creating a symlink
+        mkdir -p /home/runner/.buildozer/android/platform
+        if [ ! -L "/home/runner/.buildozer/android/platform/android-ndk-r25b" ] && [ -d "$NDK_25_PATH" ]; then
+          echo "Creating symlink to force NDK r25b usage..."
+          ln -sf "$NDK_25_PATH" "/home/runner/.buildozer/android/platform/android-ndk-r25b"
+        fi
+
         # Show environment info for debugging
+        echo "=== Environment Information ==="
         echo "Current user: $(whoami)"
         echo "Home directory: $HOME"
         echo "Working directory: $(pwd)"
         echo "Android SDK Root: $ANDROID_SDK_ROOT"
         echo "Android Home: $ANDROID_HOME"
         echo "Android NDK Home: $ANDROID_NDK_HOME"
+        echo "ANDROIDNDK: $ANDROIDNDK"
+        echo "NDK_25_PATH: $NDK_25_PATH"
         echo "Java Home: $JAVA_HOME"
         echo "Buildozer Home: $BUILDOZER_HOME"
         echo "PATH: $PATH"
+
+        # Verify NDK version and paths
+        echo "=== NDK Version Verification ==="
+        if [ -f "$ANDROIDNDK/source.properties" ]; then
+          echo "NDK source.properties content:"
+          cat "$ANDROIDNDK/source.properties"
+        else
+          echo "NDK source.properties not found at $ANDROIDNDK"
+        fi
+
+        echo "Buildozer NDK symlink status:"
+        ls -la /home/runner/.buildozer/android/platform/ || echo "Platform directory not found"
 
         # Verify Android SDK components
         echo "=== Android SDK Verification ==="
@@ -201,7 +266,9 @@ jobs:
       env:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         ANDROID_HOME: ${{ env.ANDROID_HOME }}
-        ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        ANDROID_NDK_HOME: ${{ env.NDK_25_PATH }}
+        ANDROIDNDK: ${{ env.NDK_25_PATH }}
+        NDK_25_PATH: ${{ env.NDK_25_PATH }}
         HOME: /home/runner
         BUILDOZER_HOME: /home/runner/.buildozer
 
