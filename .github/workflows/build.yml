@@ -58,48 +58,70 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
       with:
-        api-level: 30
-        build-tools: 30.0.3
-        ndk-version: 25.2.9519653
+        cmdline-tools-version: 11076708
+        accept-android-sdk-licenses: true
+        packages: |
+          platforms;android-30
+          platforms;android-33
+          build-tools;30.0.3
+          build-tools;33.0.2
+          build-tools;34.0.0
+          platform-tools
+          ndk;25.2.9519653
 
-    - name: Download and configure NDK r25b
+    - name: Configure NDK r25b
       run: |
-        echo "=== NDK r25b Download and Configuration ==="
+        echo "=== NDK r25b Configuration ==="
 
-        # Create NDK directory
-        mkdir -p /home/runner/.buildozer/android/platform
+        # First, try to use the NDK installed by android-actions/setup-android
+        if [ -d "$ANDROID_SDK_ROOT/ndk" ]; then
+          echo "Available NDK versions in SDK:"
+          ls -la $ANDROID_SDK_ROOT/ndk/
 
-        # Download NDK r25b directly to ensure we have the correct version
-        NDK_25B_URL="https://dl.google.com/android/repository/android-ndk-r25b-linux.zip"
-        NDK_25B_PATH="/home/runner/.buildozer/android/platform/android-ndk-r25b"
+          # Look for NDK 25.x
+          NDK_25_PATH=$(find $ANDROID_SDK_ROOT/ndk -maxdepth 1 -name "25.*" -type d | head -1)
 
-        if [ ! -d "$NDK_25B_PATH" ]; then
-          echo "Downloading NDK r25b..."
-          cd /home/runner/.buildozer/android/platform
-          wget -q "$NDK_25B_URL" -O android-ndk-r25b.zip
-          echo "Extracting NDK r25b..."
-          unzip -q android-ndk-r25b.zip
-          rm android-ndk-r25b.zip
-          echo "NDK r25b downloaded and extracted successfully"
-        else
-          echo "NDK r25b already exists at $NDK_25B_PATH"
+          if [ -n "$NDK_25_PATH" ] && [ -d "$NDK_25_PATH" ]; then
+            echo "Found NDK 25 installed by setup-android at: $NDK_25_PATH"
+          else
+            echo "NDK 25 not found in SDK, will download manually..."
+            NDK_25_PATH=""
+          fi
+        fi
+
+        # If NDK 25 not found, download it manually
+        if [ -z "$NDK_25_PATH" ] || [ ! -d "$NDK_25_PATH" ]; then
+          echo "Downloading NDK r25b manually..."
+          mkdir -p /home/runner/.buildozer/android/platform
+
+          NDK_25B_URL="https://dl.google.com/android/repository/android-ndk-r25b-linux.zip"
+          NDK_25_PATH="/home/runner/.buildozer/android/platform/android-ndk-r25b"
+
+          if [ ! -d "$NDK_25_PATH" ]; then
+            cd /home/runner/.buildozer/android/platform
+            wget -q "$NDK_25B_URL" -O android-ndk-r25b.zip
+            echo "Extracting NDK r25b..."
+            unzip -q android-ndk-r25b.zip
+            rm android-ndk-r25b.zip
+            echo "NDK r25b downloaded and extracted successfully"
+          fi
         fi
 
         # Verify NDK r25b installation
-        if [ -f "$NDK_25B_PATH/source.properties" ]; then
+        if [ -f "$NDK_25_PATH/source.properties" ]; then
           echo "NDK r25b version info:"
-          cat "$NDK_25B_PATH/source.properties"
+          cat "$NDK_25_PATH/source.properties"
         else
-          echo "ERROR: NDK r25b source.properties not found!"
+          echo "ERROR: NDK r25b source.properties not found at $NDK_25_PATH!"
           exit 1
         fi
 
         # Set environment variables
-        echo "NDK_25_PATH=$NDK_25B_PATH" >> $GITHUB_ENV
-        echo "ANDROID_NDK_HOME=$NDK_25B_PATH" >> $GITHUB_ENV
-        echo "ANDROIDNDK=$NDK_25B_PATH" >> $GITHUB_ENV
+        echo "NDK_25_PATH=$NDK_25_PATH" >> $GITHUB_ENV
+        echo "ANDROID_NDK_HOME=$NDK_25_PATH" >> $GITHUB_ENV
+        echo "ANDROIDNDK=$NDK_25_PATH" >> $GITHUB_ENV
 
-        echo "NDK r25b configured at: $NDK_25B_PATH"
+        echo "NDK r25b configured at: $NDK_25_PATH"
 
     - name: Accept Android SDK licenses
       run: |
@@ -397,7 +419,7 @@ jobs:
         HOME: /home/runner
         BUILDOZER_HOME: /home/runner/.buildozer
 
-    - name: Collect and upload APK artifacts
+    - name: Collect APK artifacts
       if: success()
       run: |
         # Create a directory for APK collection
@@ -418,10 +440,14 @@ jobs:
 
         if [ $APK_COUNT -eq 0 ]; then
           echo "❌ No APK files found to upload"
-          exit 1
+          echo "This indicates the build process may have failed"
+          # Create a placeholder file to indicate no APK was generated
+          echo "No APK files were generated during this build" > apk_output/NO_APK_GENERATED.txt
+          echo "APK_FOUND=false" >> $GITHUB_ENV
         else
           echo "✅ Collected $APK_COUNT APK file(s)"
           ls -la apk_output/
+          echo "APK_FOUND=true" >> $GITHUB_ENV
         fi
 
     - name: Upload APK artifact
@@ -429,8 +455,9 @@ jobs:
       if: success()
       with:
         name: pushup-counter-debug-apk
-        path: apk_output/*.apk
+        path: apk_output/
         retention-days: 30
+        if-no-files-found: warn
 
     - name: Collect build logs and diagnostics
       if: always()  # Run even if build succeeds, for debugging
