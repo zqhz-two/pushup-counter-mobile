@@ -355,6 +355,35 @@ jobs:
           exit $BUILD_EXIT_CODE
         else
           echo "✅ Buildozer completed successfully!"
+
+          # Find and verify APK files
+          echo "=== APK File Detection ==="
+          echo "Searching for generated APK files..."
+
+          # Check common APK locations
+          APK_LOCATIONS=(
+            "bin/*.apk"
+            ".buildozer/android/platform/build-*/bin/*.apk"
+            ".buildozer/android/platform/build-*/dist/*.apk"
+            "dist/*.apk"
+          )
+
+          APK_FOUND=false
+          for location in "${APK_LOCATIONS[@]}"; do
+            if ls $location 1> /dev/null 2>&1; then
+              echo "✅ Found APK files at: $location"
+              ls -la $location
+              APK_FOUND=true
+            else
+              echo "❌ No APK files found at: $location"
+            fi
+          done
+
+          if [ "$APK_FOUND" = false ]; then
+            echo "⚠️ Warning: No APK files found in expected locations"
+            echo "Searching entire build directory for APK files..."
+            find .buildozer -name "*.apk" -type f 2>/dev/null || echo "No APK files found anywhere"
+          fi
         fi
       env:
         ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
@@ -368,21 +397,90 @@ jobs:
         HOME: /home/runner
         BUILDOZER_HOME: /home/runner/.buildozer
 
+    - name: Collect and upload APK artifacts
+      if: success()
+      run: |
+        # Create a directory for APK collection
+        mkdir -p apk_output
+
+        # Find and copy all APK files to the collection directory
+        echo "Collecting APK files..."
+        APK_COUNT=0
+
+        # Search in multiple possible locations
+        for apk_file in $(find . -name "*.apk" -type f 2>/dev/null); do
+          if [ -f "$apk_file" ]; then
+            echo "Found APK: $apk_file"
+            cp "$apk_file" "apk_output/"
+            APK_COUNT=$((APK_COUNT + 1))
+          fi
+        done
+
+        if [ $APK_COUNT -eq 0 ]; then
+          echo "❌ No APK files found to upload"
+          exit 1
+        else
+          echo "✅ Collected $APK_COUNT APK file(s)"
+          ls -la apk_output/
+        fi
+
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       if: success()
       with:
         name: pushup-counter-debug-apk
-        path: bin/*.apk
+        path: apk_output/*.apk
         retention-days: 30
+
+    - name: Collect build logs and diagnostics
+      if: always()  # Run even if build succeeds, for debugging
+      run: |
+        # Create logs directory
+        mkdir -p build_logs
+
+        # Collect buildozer output
+        if [ -f "/tmp/buildozer_output.log" ]; then
+          cp "/tmp/buildozer_output.log" build_logs/
+        fi
+
+        # Collect python-for-android logs
+        if [ -d ".buildozer/android/platform/python-for-android" ]; then
+          find .buildozer/android/platform/python-for-android -name "*.log" -type f | while read logfile; do
+            # Create relative path for log file
+            rel_path=$(echo "$logfile" | sed 's|.buildozer/android/platform/python-for-android/||')
+            mkdir -p "build_logs/p4a/$(dirname "$rel_path")"
+            cp "$logfile" "build_logs/p4a/$rel_path"
+          done
+        fi
+
+        # Collect buildozer logs
+        if [ -d ".buildozer" ]; then
+          find .buildozer -name "*.log" -type f | head -20 | while read logfile; do
+            rel_path=$(echo "$logfile" | sed 's|.buildozer/||')
+            mkdir -p "build_logs/buildozer/$(dirname "$rel_path")"
+            cp "$logfile" "build_logs/buildozer/$rel_path"
+          done
+        fi
+
+        # Create a summary file
+        echo "Build Summary - $(date)" > build_logs/build_summary.txt
+        echo "================================" >> build_logs/build_summary.txt
+        echo "Build Status: ${{ job.status }}" >> build_logs/build_summary.txt
+        echo "Commit: ${{ github.sha }}" >> build_logs/build_summary.txt
+        echo "Branch: ${{ github.ref_name }}" >> build_logs/build_summary.txt
+        echo "" >> build_logs/build_summary.txt
+
+        # Add environment info
+        echo "NDK Environment Variables:" >> build_logs/build_summary.txt
+        env | grep -i ndk | sort >> build_logs/build_summary.txt
+
+        echo "Collected logs:"
+        find build_logs -type f | sort
 
     - name: Upload build logs
       uses: actions/upload-artifact@v4
-      if: failure()
+      if: always()
       with:
-        name: build-logs
-        path: |
-          .buildozer/android/platform/build-*/**/*.log
-          .buildozer/android/platform/python-for-android/**/*.log
-          .buildozer/android/platform/python-for-android/dist/*/build.log
+        name: build-logs-and-diagnostics
+        path: build_logs/
         retention-days: 7
