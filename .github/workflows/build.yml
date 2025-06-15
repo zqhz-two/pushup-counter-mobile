@@ -292,12 +292,38 @@ jobs:
         echo "=== AIDL Tool Check ==="
         find $ANDROID_SDK_ROOT -name "aidl" -type f 2>/dev/null || echo "AIDL tool not found"
 
-        # Verify buildozer.spec exists and show NDK path setting
+        # Verify and analyze buildozer.spec configuration
         if [ -f buildozer.spec ]; then
-          echo "buildozer.spec found"
-          grep -n "android.ndk_path" buildozer.spec || echo "android.ndk_path not set (will auto-download)"
+          echo "✅ buildozer.spec found"
+          echo "=== Buildozer Configuration Analysis ==="
+
+          # Show key configuration values
+          echo "App title: $(grep '^title' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Package name: $(grep '^package.name' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Package domain: $(grep '^package.domain' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Source directory: $(grep '^source.dir' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Main source file: $(grep '^source.include_exts' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Requirements: $(grep '^requirements' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Android API: $(grep '^android.api' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+          echo "Android NDK: $(grep '^android.ndk' buildozer.spec | cut -d'=' -f2 | tr -d ' ')"
+
+          # Check if main.py exists
+          MAIN_PY=$(grep '^source.dir' buildozer.spec | cut -d'=' -f2 | tr -d ' ')
+          if [ -z "$MAIN_PY" ]; then
+            MAIN_PY="."
+          fi
+
+          if [ -f "$MAIN_PY/main.py" ]; then
+            echo "✅ Main source file found: $MAIN_PY/main.py"
+            echo "Main.py size: $(ls -lh "$MAIN_PY/main.py" | awk '{print $5}')"
+          else
+            echo "❌ WARNING: Main source file not found at $MAIN_PY/main.py"
+            echo "Available Python files:"
+            find "$MAIN_PY" -name "*.py" -type f | head -5
+          fi
+
         else
-          echo "buildozer.spec not found, initializing..."
+          echo "❌ buildozer.spec not found, initializing..."
           buildozer init
         fi
 
@@ -325,17 +351,85 @@ jobs:
         # Run buildozer with error capture and output logging
         set +e  # Don't exit on error immediately
         echo "Executing: buildozer android debug"
-        buildozer android debug 2>&1 | tee /tmp/buildozer_output.log
+        echo "Command start time: $(date)"
+
+        # Run buildozer with verbose output
+        buildozer android debug --verbose 2>&1 | tee /tmp/buildozer_output.log
         BUILD_EXIT_CODE=$?
+
+        echo "Command end time: $(date)"
+        echo "Buildozer exit code: $BUILD_EXIT_CODE"
         set -e  # Re-enable exit on error
 
+        # Always perform comprehensive APK detection regardless of exit code
+        echo "=== Comprehensive APK Detection ==="
+        echo "Searching for generated APK files..."
+
+        # Check common APK locations
+        APK_LOCATIONS=(
+          "bin/*.apk"
+          ".buildozer/android/platform/build-*/bin/*.apk"
+          ".buildozer/android/platform/build-*/dist/*.apk"
+          ".buildozer/android/platform/build-*/outputs/apk/debug/*.apk"
+          "dist/*.apk"
+        )
+
+        APK_FOUND=false
+        APK_FILES=()
+
+        for location in "${APK_LOCATIONS[@]}"; do
+          if ls $location 1> /dev/null 2>&1; then
+            echo "✅ Found APK files at: $location"
+            ls -la $location
+            for apk in $location; do
+              if [ -f "$apk" ]; then
+                APK_FILES+=("$apk")
+                APK_FOUND=true
+              fi
+            done
+          else
+            echo "❌ No APK files found at: $location"
+          fi
+        done
+
+        # Comprehensive search if no APK found in expected locations
+        if [ "$APK_FOUND" = false ]; then
+          echo "⚠️ No APK files found in expected locations"
+          echo "Performing comprehensive search..."
+
+          # Search entire project for APK files
+          ALL_APKS=$(find . -name "*.apk" -type f 2>/dev/null)
+          if [ -n "$ALL_APKS" ]; then
+            echo "✅ Found APK files in unexpected locations:"
+            echo "$ALL_APKS" | while read apk; do
+              echo "  $apk ($(ls -lh "$apk" | awk '{print $5}'))"
+              APK_FILES+=("$apk")
+            done
+            APK_FOUND=true
+          else
+            echo "❌ No APK files found anywhere in the project"
+          fi
+        fi
+
+        # Analyze build results
         if [ $BUILD_EXIT_CODE -ne 0 ]; then
           echo "❌ Buildozer failed with exit code: $BUILD_EXIT_CODE"
-          echo "=== Buildozer Error Analysis ==="
+          ANALYSIS_NEEDED=true
+        elif [ "$APK_FOUND" = false ]; then
+          echo "❌ Buildozer completed but no APK was generated"
+          ANALYSIS_NEEDED=true
+        else
+          echo "✅ Buildozer completed successfully and APK files were generated!"
+          ANALYSIS_NEEDED=false
+        fi
+
+        # Perform detailed error analysis if needed
+        if [ "$ANALYSIS_NEEDED" = true ]; then
+          echo "=== Detailed Build Analysis ==="
 
           # Show the last part of buildozer output for immediate context
-          echo "=== Last 30 lines of buildozer output ==="
-          tail -30 /tmp/buildozer_output.log 2>/dev/null || echo "No buildozer output log found"
+          echo "=== Last 50 lines of buildozer output ==="
+          tail -50 /tmp/buildozer_output.log 2>/dev/null || echo "No buildozer output log found"
 
           # Check for python-for-android logs
           echo "=== Python-for-android logs ==="
@@ -357,55 +451,29 @@ jobs:
             done
           fi
 
-          # Check for NDK-related errors with more context
-          echo "=== NDK Environment Check ==="
-          echo "All NDK-related environment variables:"
-          env | grep -i ndk | sort
-
-          echo "=== NDK-related errors in logs ==="
-          find .buildozer -name "*.log" -type f -exec grep -l "ndk\|NDK" {} \; | head -5 | while read logfile; do
-            echo "=== NDK references in $logfile ==="
-            grep -n -C 3 "ndk\|NDK" "$logfile" | tail -20
+          # Check for gradle build logs
+          echo "=== Gradle Build Logs ==="
+          find .buildozer -name "gradle*.log" -type f | head -3 | while read gradlelog; do
+            echo "Gradle log: $gradlelog (last 50 lines)"
+            tail -50 "$gradlelog"
           done
 
           # Check for specific error patterns
-          echo "=== Common Error Patterns ==="
-          find .buildozer -name "*.log" -type f -exec grep -l "error\|Error\|ERROR\|failed\|Failed\|FAILED" {} \; | head -3 | while read errorlog; do
-            echo "Errors in $errorlog:"
-            grep -n -i "error\|failed" "$errorlog" | tail -10
-          done
+          echo "=== Error Pattern Analysis ==="
+          if [ -f "/tmp/buildozer_output.log" ]; then
+            echo "Searching for common error patterns in buildozer output..."
+            grep -n -i "error\|failed\|exception\|traceback" /tmp/buildozer_output.log | tail -20
+          fi
 
-          exit $BUILD_EXIT_CODE
-        else
-          echo "✅ Buildozer completed successfully!"
+          # If buildozer succeeded but no APK, this is a silent failure
+          if [ $BUILD_EXIT_CODE -eq 0 ] && [ "$APK_FOUND" = false ]; then
+            echo "🔍 SILENT FAILURE DETECTED: Buildozer reported success but no APK generated"
+            echo "This usually indicates a problem in the final APK packaging stage"
+          fi
 
-          # Find and verify APK files
-          echo "=== APK File Detection ==="
-          echo "Searching for generated APK files..."
-
-          # Check common APK locations
-          APK_LOCATIONS=(
-            "bin/*.apk"
-            ".buildozer/android/platform/build-*/bin/*.apk"
-            ".buildozer/android/platform/build-*/dist/*.apk"
-            "dist/*.apk"
-          )
-
-          APK_FOUND=false
-          for location in "${APK_LOCATIONS[@]}"; do
-            if ls $location 1> /dev/null 2>&1; then
-              echo "✅ Found APK files at: $location"
-              ls -la $location
-              APK_FOUND=true
-            else
-              echo "❌ No APK files found at: $location"
-            fi
-          done
-
+          # Exit with error if no APK was generated
           if [ "$APK_FOUND" = false ]; then
-            echo "⚠️ Warning: No APK files found in expected locations"
-            echo "Searching entire build directory for APK files..."
-            find .buildozer -name "*.apk" -type f 2>/dev/null || echo "No APK files found anywhere"
+            exit 1
           fi
         fi
       env:
@@ -421,35 +489,73 @@ jobs:
         BUILDOZER_HOME: /home/runner/.buildozer
 
     - name: Collect APK artifacts
-      if: success()
+      if: always()  # Run even if previous steps failed
       run: |
         # Create a directory for APK collection
         mkdir -p apk_output
 
-        # Find and copy all APK files to the collection directory
-        echo "Collecting APK files..."
+        echo "=== APK Collection Process ==="
+        echo "Collecting all APK files found during build..."
         APK_COUNT=0
 
-        # Search in multiple possible locations
-        for apk_file in $(find . -name "*.apk" -type f 2>/dev/null); do
-          if [ -f "$apk_file" ]; then
-            echo "Found APK: $apk_file"
-            cp "$apk_file" "apk_output/"
-            APK_COUNT=$((APK_COUNT + 1))
-          fi
-        done
+        # Search comprehensively for APK files
+        echo "Searching for APK files..."
+        APK_SEARCH_RESULTS=$(find . -name "*.apk" -type f 2>/dev/null || true)
 
-        if [ $APK_COUNT -eq 0 ]; then
-          echo "❌ No APK files found to upload"
-          echo "This indicates the build process may have failed"
-          # Create a placeholder file to indicate no APK was generated
-          echo "No APK files were generated during this build" > apk_output/NO_APK_GENERATED.txt
-          echo "APK_FOUND=false" >> $GITHUB_ENV
-        else
-          echo "✅ Collected $APK_COUNT APK file(s)"
+        if [ -n "$APK_SEARCH_RESULTS" ]; then
+          echo "Found APK files:"
+          echo "$APK_SEARCH_RESULTS" | while read apk_file; do
+            if [ -f "$apk_file" ]; then
+              echo "  📱 $apk_file ($(ls -lh "$apk_file" | awk '{print $5}'))"
+              # Copy with original filename
+              cp "$apk_file" "apk_output/"
+              APK_COUNT=$((APK_COUNT + 1))
+            fi
+          done
+
+          # Also copy to a predictable filename
+          FIRST_APK=$(echo "$APK_SEARCH_RESULTS" | head -1)
+          if [ -f "$FIRST_APK" ]; then
+            cp "$FIRST_APK" "apk_output/pushup_counter_latest.apk"
+            echo "✅ Main APK copied as: pushup_counter_latest.apk"
+          fi
+
+          echo "✅ Collected APK files successfully"
           ls -la apk_output/
-          echo "APK_FOUND=true" >> $GITHUB_ENV
+        else
+          echo "❌ No APK files found anywhere in the project"
+
+          # Create detailed diagnostic file
+          echo "Build Analysis Report" > apk_output/BUILD_ANALYSIS.txt
+          echo "====================" >> apk_output/BUILD_ANALYSIS.txt
+          echo "APK Generation Status: FAILED" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Reason: No APK files found after build completion" >> apk_output/BUILD_ANALYSIS.txt
+          echo "" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Date: $(date)" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Commit: ${{ github.sha }}" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Branch: ${{ github.ref_name }}" >> apk_output/BUILD_ANALYSIS.txt
+          echo "" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Potential APK Locations Checked:" >> apk_output/BUILD_ANALYSIS.txt
+          echo "- bin/*.apk" >> apk_output/BUILD_ANALYSIS.txt
+          echo "- .buildozer/android/platform/build-*/bin/*.apk" >> apk_output/BUILD_ANALYSIS.txt
+          echo "- .buildozer/android/platform/build-*/dist/*.apk" >> apk_output/BUILD_ANALYSIS.txt
+          echo "- .buildozer/android/platform/build-*/outputs/apk/debug/*.apk" >> apk_output/BUILD_ANALYSIS.txt
+          echo "- dist/*.apk" >> apk_output/BUILD_ANALYSIS.txt
+          echo "" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Build Directory Structure:" >> apk_output/BUILD_ANALYSIS.txt
+          find .buildozer -type d -name "*build*" 2>/dev/null | head -10 >> apk_output/BUILD_ANALYSIS.txt || echo "No build directories found" >> apk_output/BUILD_ANALYSIS.txt
+          echo "" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Last 20 lines of buildozer output:" >> apk_output/BUILD_ANALYSIS.txt
+          tail -20 /tmp/buildozer_output.log 2>/dev/null >> apk_output/BUILD_ANALYSIS.txt || echo "No buildozer output available" >> apk_output/BUILD_ANALYSIS.txt
+          echo "" >> apk_output/BUILD_ANALYSIS.txt
+          echo "Recommendation: Check build-logs-and-diagnostics artifact for detailed error analysis." >> apk_output/BUILD_ANALYSIS.txt
+
+          echo "No APK files were generated during this build" > apk_output/NO_APK_GENERATED.txt
         fi
+
+        # Always show what we're uploading
+        echo "=== Final APK Output Directory ==="
+        ls -la apk_output/
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
