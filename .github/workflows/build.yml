@@ -61,6 +61,9 @@ jobs:
           build-essential \
           libffi-dev \
           libssl-dev \
+          libssl3 \
+          openssl \
+          pkg-config \
           python3-dev \
           python3-setuptools \
           python3-venv
@@ -231,6 +234,53 @@ jobs:
         # Show aclocal search path
         echo "Aclocal search path: $ACLOCAL_PATH"
 
+    - name: Configure OpenSSL and pkg-config
+      run: |
+        echo "=== OpenSSL and pkg-config Configuration ==="
+
+        # Verify OpenSSL installation
+        openssl version
+
+        # Find OpenSSL pkg-config files
+        echo "OpenSSL pkg-config files:"
+        find /usr -name "openssl.pc" 2>/dev/null || echo "openssl.pc not found"
+        find /usr -name "libssl.pc" 2>/dev/null || echo "libssl.pc not found"
+        find /usr -name "libcrypto.pc" 2>/dev/null || echo "libcrypto.pc not found"
+
+        # Set up pkg-config path for OpenSSL
+        export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH}"
+        echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH" >> $GITHUB_ENV
+
+        # Test pkg-config for OpenSSL
+        echo "Testing pkg-config for OpenSSL:"
+        pkg-config --exists openssl && echo "✅ openssl found" || echo "❌ openssl not found"
+        pkg-config --exists libssl && echo "✅ libssl found" || echo "❌ libssl not found"
+        pkg-config --exists libcrypto && echo "✅ libcrypto found" || echo "❌ libcrypto not found"
+
+        # Show OpenSSL configuration
+        if pkg-config --exists openssl; then
+          echo "OpenSSL version: $(pkg-config --modversion openssl)"
+          echo "OpenSSL cflags: $(pkg-config --cflags openssl)"
+          echo "OpenSSL libs: $(pkg-config --libs openssl)"
+        fi
+
+        # Create OpenSSL pkg-config file if missing
+        if ! pkg-config --exists openssl; then
+          echo "Creating OpenSSL pkg-config file..."
+          sudo mkdir -p /usr/lib/pkgconfig
+
+          # Create openssl.pc file
+          echo "prefix=/usr" | sudo tee /usr/lib/pkgconfig/openssl.pc
+          echo "exec_prefix=\${prefix}" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "libdir=\${exec_prefix}/lib/x86_64-linux-gnu" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "includedir=\${prefix}/include" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "Name: OpenSSL" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "Description: Secure Sockets Layer and cryptography libraries and tools" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "Version: $(openssl version | cut -d' ' -f2)" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+          echo "Requires: libssl libcrypto" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
+        fi
+
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -284,6 +334,9 @@ jobs:
         export ACLOCAL_PATH="/usr/local/share/aclocal:/usr/share/aclocal:${ACLOCAL_PATH}"
         export LIBTOOL="/usr/local/bin/libtool"
         export LIBTOOLIZE="/usr/local/bin/libtoolize"
+
+        # Ensure pkg-config can find OpenSSL
+        export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH}"
 
         export PATH=/usr/local/bin:$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
@@ -554,6 +607,7 @@ jobs:
         NDK_ROOT: ${{ env.NDK_25_PATH }}
         NDK_25_PATH: ${{ env.NDK_25_PATH }}
         ACLOCAL_PATH: ${{ env.ACLOCAL_PATH }}
+        PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
         LIBTOOL: /usr/local/bin/libtool
         LIBTOOLIZE: /usr/local/bin/libtoolize
         HOME: /home/runner
