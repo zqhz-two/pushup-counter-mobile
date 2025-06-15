@@ -281,6 +281,17 @@ jobs:
           echo "Requires: libssl libcrypto" | sudo tee -a /usr/lib/pkgconfig/openssl.pc
         fi
 
+        # Verify OpenSSL library files exist
+        echo "=== OpenSSL Library Verification ==="
+        echo "Checking OpenSSL library files:"
+        ls -la /usr/lib/x86_64-linux-gnu/libssl* || echo "libssl not found"
+        ls -la /usr/lib/x86_64-linux-gnu/libcrypto* || echo "libcrypto not found"
+        ls -la /usr/include/openssl/ | head -5 || echo "OpenSSL headers not found"
+
+        # Test OpenSSL functionality
+        echo "Testing OpenSSL functionality:"
+        openssl version -a
+
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
@@ -337,6 +348,18 @@ jobs:
 
         # Ensure pkg-config can find OpenSSL
         export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pkgconfig:/usr/share/pkgconfig:${PKG_CONFIG_PATH}"
+
+        # Set OpenSSL environment variables for python-for-android
+        export OPENSSL_VERSION="$(openssl version | cut -d' ' -f2)"
+        export OPENSSL_ROOT_DIR="/usr"
+        export OPENSSL_INCLUDE_DIR="/usr/include/openssl"
+        export OPENSSL_CRYPTO_LIBRARY="/usr/lib/x86_64-linux-gnu/libcrypto.so"
+        export OPENSSL_SSL_LIBRARY="/usr/lib/x86_64-linux-gnu/libssl.so"
+        export OPENSSL_LIBRARIES="/usr/lib/x86_64-linux-gnu"
+
+        # Additional SSL/TLS environment variables
+        export SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
+        export SSL_CERT_DIR="/etc/ssl/certs"
 
         export PATH=/usr/local/bin:$PATH:$ANDROID_SDK_ROOT/tools:$ANDROID_SDK_ROOT/platform-tools:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
 
@@ -608,6 +631,13 @@ jobs:
         NDK_25_PATH: ${{ env.NDK_25_PATH }}
         ACLOCAL_PATH: ${{ env.ACLOCAL_PATH }}
         PKG_CONFIG_PATH: ${{ env.PKG_CONFIG_PATH }}
+        OPENSSL_ROOT_DIR: /usr
+        OPENSSL_INCLUDE_DIR: /usr/include/openssl
+        OPENSSL_CRYPTO_LIBRARY: /usr/lib/x86_64-linux-gnu/libcrypto.so
+        OPENSSL_SSL_LIBRARY: /usr/lib/x86_64-linux-gnu/libssl.so
+        OPENSSL_LIBRARIES: /usr/lib/x86_64-linux-gnu
+        SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+        SSL_CERT_DIR: /etc/ssl/certs
         LIBTOOL: /usr/local/bin/libtool
         LIBTOOLIZE: /usr/local/bin/libtoolize
         HOME: /home/runner
