@@ -35,9 +35,18 @@ jobs:
         # Install main dependencies
         sudo apt install -y \
           git zip unzip openjdk-11-jdk python3-pip \
-          autoconf libtool pkg-config zlib1g-dev \
+          autoconf automake libtool pkg-config zlib1g-dev \
           libncurses5-dev libncursesw5-dev \
           cmake libffi-dev libssl-dev
+
+        # Install additional autotools and build dependencies
+        sudo apt install -y \
+          autotools-dev \
+          libtool-bin \
+          autopoint \
+          gettext \
+          m4 \
+          texinfo
 
         # Handle libtinfo5 compatibility for Ubuntu 24.04
         if ! sudo apt install -y libtinfo5 2>/dev/null; then
@@ -53,7 +62,16 @@ jobs:
           libffi-dev \
           libssl-dev \
           python3-dev \
-          python3-setuptools
+          python3-setuptools \
+          python3-distutils
+
+        # Verify autotools installation
+        echo "=== Autotools Verification ==="
+        autoconf --version | head -1
+        automake --version | head -1
+        libtool --version | head -1
+        echo "Available libtool macros:"
+        find /usr/share/aclocal -name "*libtool*" | head -5
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
@@ -167,6 +185,26 @@ jobs:
         ls -la $ANDROID_SDK_ROOT/platforms/ || echo "No platforms directory found"
         echo "NDK installations:"
         ls -la $ANDROID_SDK_ROOT/ndk/ || echo "No NDK directory found"
+
+    - name: Configure autotools environment
+      run: |
+        # Ensure autotools can find all necessary macros
+        echo "=== Autotools Environment Setup ==="
+
+        # Update autotools macro search path
+        export ACLOCAL_PATH="/usr/share/aclocal:${ACLOCAL_PATH}"
+        echo "ACLOCAL_PATH=$ACLOCAL_PATH" >> $GITHUB_ENV
+
+        # Regenerate autotools cache
+        sudo autoreconf --install --force || true
+
+        # Verify libtool macros are available
+        echo "Checking for LT_SYS_SYMBOL_USCORE macro:"
+        grep -r "LT_SYS_SYMBOL_USCORE" /usr/share/aclocal/ || echo "Macro not found in standard location"
+
+        # List available libtool-related macros
+        echo "Available libtool macros:"
+        ls -la /usr/share/aclocal/*libtool* || echo "No libtool macro files found"
 
     - name: Install Python dependencies
       run: |
