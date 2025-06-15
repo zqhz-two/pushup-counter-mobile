@@ -60,14 +60,23 @@ jobs:
       with:
         cmdline-tools-version: 11076708
         accept-android-sdk-licenses: true
-        packages: |
-          platforms;android-30
-          platforms;android-33
-          build-tools;30.0.3
-          build-tools;33.0.2
-          build-tools;34.0.0
-          platform-tools
-          ndk;25.2.9519653
+
+    - name: Install Android SDK packages
+      run: |
+        echo "Installing Android SDK packages..."
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --update
+
+        # Install packages one by one for better error handling
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.2"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;25.2.9519653"
+
+        echo "Installed packages:"
+        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --list_installed
 
     - name: Configure NDK r25b
       run: |
@@ -146,26 +155,18 @@ jobs:
         echo "Checking accepted licenses:"
         ls -la $ANDROID_SDK_ROOT/licenses/ || echo "No licenses directory found"
 
-    - name: Install additional Android SDK components
+    - name: Verify Android SDK installation
       run: |
-        # Update SDK manager and install required components
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --update
-
-        # Install specific build-tools versions that might be needed
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;30.0.3"
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;33.0.2"
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "build-tools;34.0.0"
-
-        # Install platform tools and other essentials
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platform-tools"
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-30"
-        $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "platforms;android-33"
+        echo "=== Android SDK Verification ==="
+        echo "SDK Root: $ANDROID_SDK_ROOT"
 
         # Verify installations
         echo "Installed build-tools:"
         ls -la $ANDROID_SDK_ROOT/build-tools/ || echo "No build-tools directory found"
         echo "Installed platforms:"
         ls -la $ANDROID_SDK_ROOT/platforms/ || echo "No platforms directory found"
+        echo "NDK installations:"
+        ls -la $ANDROID_SDK_ROOT/ndk/ || echo "No NDK directory found"
 
     - name: Install Python dependencies
       run: |
