@@ -5,11 +5,29 @@
 处理摄像头初始化、帧捕获等功能
 """
 
-import cv2
 import threading
 import time
 from kivy.logger import Logger
 from kivy.clock import Clock
+
+# 尝试导入OpenCV，如果失败则使用Kivy Camera
+try:
+    import cv2
+    OPENCV_AVAILABLE = True
+    Logger.info("CameraHandler: OpenCV available")
+except ImportError:
+    OPENCV_AVAILABLE = False
+    Logger.warning("CameraHandler: OpenCV not available, using Kivy Camera")
+
+# 尝试导入Android相机API
+try:
+    from android.runnable import run_on_ui_thread
+    from jnius import autoclass, PythonJavaClass, java_method
+    ANDROID_CAMERA_AVAILABLE = True
+    Logger.info("CameraHandler: Android camera API available")
+except ImportError:
+    ANDROID_CAMERA_AVAILABLE = False
+    Logger.info("CameraHandler: Android camera API not available")
 
 
 class CameraHandler:

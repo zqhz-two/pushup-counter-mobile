@@ -128,3 +128,25 @@ class PermissionManager:
 
 # 全局权限管理器实例
 permission_manager = PermissionManager()
+
+
+# 为了向后兼容，提供简单的函数接口
+def request_permissions():
+    """请求所有必要权限的简化接口"""
+    try:
+        permission_manager.request_permissions()
+        Logger.info("Permissions: All permissions requested successfully")
+        return True
+    except Exception as e:
+        Logger.error(f"Permissions: Failed to request permissions: {e}")
+        return False
+
+
+def check_camera_permission():
+    """检查摄像头权限的简化接口"""
+    return permission_manager.check_camera_permission()
+
+
+def check_storage_permission():
+    """检查存储权限的简化接口"""
+    return permission_manager.check_storage_permission()
