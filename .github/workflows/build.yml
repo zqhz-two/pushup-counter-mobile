@@ -507,21 +507,38 @@ jobs:
 
         # Always perform comprehensive APK detection regardless of exit code
         echo "=== Comprehensive APK Detection ==="
+        echo "Buildozer exit code was: $BUILD_EXIT_CODE"
         echo "Searching for generated APK files..."
 
-        # Check common APK locations
+        # First, show the complete directory structure for debugging
+        echo "=== Complete Build Directory Structure ==="
+        echo "Current directory contents:"
+        ls -la .
+        echo ""
+        echo "Buildozer directory structure:"
+        find .buildozer -type d -name "*build*" 2>/dev/null | head -10
+        echo ""
+        echo "Looking for any APK files in entire project:"
+        find . -name "*.apk" -type f 2>/dev/null | head -20
+        echo ""
+
+        # Check common APK locations with more detailed output
         APK_LOCATIONS=(
           "bin/*.apk"
           ".buildozer/android/platform/build-*/bin/*.apk"
           ".buildozer/android/platform/build-*/dist/*.apk"
           ".buildozer/android/platform/build-*/outputs/apk/debug/*.apk"
+          ".buildozer/android/platform/build-*/outputs/apk/*/*.apk"
+          ".buildozer/android/platform/build-*/gradle/*/outputs/apk/debug/*.apk"
           "dist/*.apk"
+          "*.apk"
         )
 
         APK_FOUND=false
         APK_FILES=()
 
         for location in "${APK_LOCATIONS[@]}"; do
+          echo "Checking location: $location"
           if ls $location 1> /dev/null 2>&1; then
             echo "✅ Found APK files at: $location"
             ls -la $location
@@ -529,6 +546,7 @@ jobs:
               if [ -f "$apk" ]; then
                 APK_FILES+=("$apk")
                 APK_FOUND=true
+                echo "  Added to collection: $apk"
               fi
             done
           else
@@ -536,23 +554,29 @@ jobs:
           fi
         done
 
-        # Comprehensive search if no APK found in expected locations
-        if [ "$APK_FOUND" = false ]; then
-          echo "⚠️ No APK files found in expected locations"
-          echo "Performing comprehensive search..."
-
-          # Search entire project for APK files
-          ALL_APKS=$(find . -name "*.apk" -type f 2>/dev/null)
-          if [ -n "$ALL_APKS" ]; then
-            echo "✅ Found APK files in unexpected locations:"
-            echo "$ALL_APKS" | while read apk; do
-              echo "  $apk ($(ls -lh "$apk" | awk '{print $5}'))"
+        # Comprehensive search with detailed output
+        echo "=== Comprehensive APK Search ==="
+        ALL_APKS=$(find . -name "*.apk" -type f 2>/dev/null)
+        if [ -n "$ALL_APKS" ]; then
+          echo "✅ Found APK files in the project:"
+          echo "$ALL_APKS" | while read apk; do
+            if [ -f "$apk" ]; then
+              echo "  📱 $apk ($(ls -lh "$apk" | awk '{print $5}'))"
               APK_FILES+=("$apk")
-            done
-            APK_FOUND=true
-          else
-            echo "❌ No APK files found anywhere in the project"
-          fi
+              APK_FOUND=true
+            fi
+          done
+        else
+          echo "❌ No APK files found anywhere in the project"
+        fi
+
+        # Show what we found
+        echo "=== APK Detection Summary ==="
+        echo "APK_FOUND: $APK_FOUND"
+        echo "Number of APK files found: ${#APK_FILES[@]}"
+        if [ ${#APK_FILES[@]} -gt 0 ]; then
+          echo "APK files list:"
+          printf '%s\n' "${APK_FILES[@]}"
         fi
 
         # Analyze build results
@@ -651,22 +675,22 @@ jobs:
 
         echo "=== APK Collection Process ==="
         echo "Collecting all APK files found during build..."
-        APK_COUNT=0
 
         # Search comprehensively for APK files
         echo "Searching for APK files..."
         APK_SEARCH_RESULTS=$(find . -name "*.apk" -type f 2>/dev/null || true)
 
+        APK_COUNT=0
         if [ -n "$APK_SEARCH_RESULTS" ]; then
           echo "Found APK files:"
-          echo "$APK_SEARCH_RESULTS" | while read apk_file; do
+          while IFS= read -r apk_file; do
             if [ -f "$apk_file" ]; then
               echo "  📱 $apk_file ($(ls -lh "$apk_file" | awk '{print $5}'))"
               # Copy with original filename
               cp "$apk_file" "apk_output/"
               APK_COUNT=$((APK_COUNT + 1))
             fi
-          done
+          done <<< "$APK_SEARCH_RESULTS"
 
           # Also copy to a predictable filename
           FIRST_APK=$(echo "$APK_SEARCH_RESULTS" | head -1)
@@ -675,7 +699,7 @@ jobs:
             echo "✅ Main APK copied as: pushup_counter_latest.apk"
           fi
 
-          echo "✅ Collected APK files successfully"
+          echo "✅ Collected $APK_COUNT APK files successfully"
           ls -la apk_output/
         else
           echo "❌ No APK files found anywhere in the project"
