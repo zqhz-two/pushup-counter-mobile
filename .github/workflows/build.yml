@@ -46,7 +46,10 @@ jobs:
           autopoint \
           gettext \
           m4 \
-          texinfo
+          texinfo \
+          libtool \
+          automake \
+          autoconf
 
         # Handle libtinfo5 compatibility for Ubuntu 24.04
         if ! sudo apt install -y libtinfo5 2>/dev/null; then
@@ -202,25 +205,43 @@ jobs:
         sudo aclocal --force --install || true
         sudo autoreconf --install --force || true
 
-        # Install additional libtool support if needed
-        if ! grep -r "LT_SYS_SYMBOL_USCORE" /usr/share/aclocal/ >/dev/null 2>&1; then
-          echo "LT_SYS_SYMBOL_USCORE macro not found, installing additional libtool support..."
+        # Always install complete autotools from source to ensure macro compatibility
+        echo "Installing complete autotools suite from source..."
 
-          # Try to install libtool from source if the macro is missing
-          cd /tmp
-          wget -q https://ftp.gnu.org/gnu/libtool/libtool-2.4.7.tar.gz
-          tar -xzf libtool-2.4.7.tar.gz
-          cd libtool-2.4.7
-          ./configure --prefix=/usr/local
-          make -j$(nproc)
-          sudo make install
+        # Install libtool 2.4.7 from source
+        cd /tmp
+        wget -q https://ftp.gnu.org/gnu/libtool/libtool-2.4.7.tar.gz
+        tar -xzf libtool-2.4.7.tar.gz
+        cd libtool-2.4.7
+        ./configure --prefix=/usr/local
+        make -j$(nproc)
+        sudo make install
 
-          # Update aclocal path to include new installation
-          export ACLOCAL_PATH="/usr/local/share/aclocal:/usr/share/aclocal:${ACLOCAL_PATH}"
-          echo "ACLOCAL_PATH=$ACLOCAL_PATH" >> $GITHUB_ENV
+        # Install automake 1.16.5 from source
+        cd /tmp
+        wget -q https://ftp.gnu.org/gnu/automake/automake-1.16.5.tar.gz
+        tar -xzf automake-1.16.5.tar.gz
+        cd automake-1.16.5
+        ./configure --prefix=/usr/local
+        make -j$(nproc)
+        sudo make install
 
-          cd /home/runner/work/pushup-counter-mobile/pushup-counter-mobile
-        fi
+        # Install autoconf 2.71 from source
+        cd /tmp
+        wget -q https://ftp.gnu.org/gnu/autoconf/autoconf-2.71.tar.gz
+        tar -xzf autoconf-2.71.tar.gz
+        cd autoconf-2.71
+        ./configure --prefix=/usr/local
+        make -j$(nproc)
+        sudo make install
+
+        # Update environment to prioritize our installations
+        export PATH="/usr/local/bin:$PATH"
+        export ACLOCAL_PATH="/usr/local/share/aclocal:/usr/share/aclocal"
+        echo "PATH=/usr/local/bin:$PATH" >> $GITHUB_ENV
+        echo "ACLOCAL_PATH=/usr/local/share/aclocal:/usr/share/aclocal" >> $GITHUB_ENV
+
+        cd /home/runner/work/pushup-counter-mobile/pushup-counter-mobile
 
         # Verify libtool macros are available
         echo "=== Libtool Macro Verification ==="
